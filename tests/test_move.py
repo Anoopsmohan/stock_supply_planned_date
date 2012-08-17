@@ -22,6 +22,46 @@ class MoveUpdateTestCase(unittest.TestCase):
     """
     Test Stock Move Update Planned Date
     """
+    def setup_chart_of_accounts(self, company_id):
+        account_template, = self.account_template_obj.search(
+            [('parent', '=', False)])
+        self.create_chart_account_obj = POOL.get(
+            'account.create_chart', type="wizard")
+        wiz_id, start_state, end_state = self.create_chart_account_obj.create()
+        self.create_chart_account_obj.execute(wiz_id, {}, 'account')
+        self.create_chart_account_obj.execute(wiz_id,
+            {
+                start_state: {
+                    'account_template': account_template,
+                    'company': company_id,
+                }
+            }, 'account'
+        )
+        # Create account_type
+        account_type_id = self.account_type.create({
+            'name': 'sample_test',
+            'sequence': '1',
+            'display_balance': 'debit-credit',
+            'company': company_id
+        })
+        # Create account with kind 'payable'
+        account_id1 = self.account.create({
+            'name': 'test',
+            'company': company_id,
+            'type': account_type_id,
+            'left': '1',
+            'right': '2',
+            'kind': 'payable',
+        })
+        # Create account with kind 'expense'
+        account_id2 = self.account.create({
+            'name': 'test',
+            'company': company_id,
+            'type': account_type_id,
+            'left': '1',
+            'right': '2',
+            'kind': 'expense',
+        })
 
     def setUp(self):
         trytond.tests.test_tryton.install_module('stock_supply_planned_date')
@@ -38,8 +78,6 @@ class MoveUpdateTestCase(unittest.TestCase):
         self.account_type = POOL.get('account.account.type')
         self.account_template_obj = POOL.get('account.account.template')
         self.account_journal_obj = POOL.get('account.journal')
-        self.create_chart_account_obj = POOL.get(
-            'account.account.create_chart_account', type="wizard")
         self.payment_term = POOL.get('account.invoice.payment_term')
         self.ir_model_data = POOL.get('ir.model.data')
 
@@ -52,9 +90,11 @@ class MoveUpdateTestCase(unittest.TestCase):
             unit_id, = self.uom.search([('name', '=', 'Unit')])
             product_id = self.product.create({
                 'name': 'Test Move.update_planned_dates',
-                'type': 'stockable',
+                'type': 'goods',
                 'category': category_id,
                 'cost_price_method': 'fixed',
+                'list_price': '50',
+                'cost_price': '45',
                 'default_uom': unit_id,
                 })
             supplier_id, = self.location.search([('code', '=', 'SUP')])
@@ -109,8 +149,6 @@ class MoveUpdateTestCase(unittest.TestCase):
                         ('planned_date', '<', today),
                     ], count=True), 2)
 
-
-
             with Transaction().set_user(cron_user):
                 self.move.update_supply_planned_date()
 
@@ -126,23 +164,8 @@ class MoveUpdateTestCase(unittest.TestCase):
                         ('planned_date', '<', today),
                     ], count=True), 0)
 
-    def setup_chart_of_accounts(self, company):
-        account_template, = self.account_template_obj.search(
-            [('parent', '=', False)])
-
-        wiz_id = self.create_chart_account_obj.create()
-        self.create_chart_account_obj.execute(wiz_id, {}, 'account')
-        self.create_chart_account_obj.execute(wiz_id,
-            {
-                'form': {
-                    'account_template': account_template,
-                    'company': company,
-                    }
-            }, 'create_account'
-        )
-
     def test0020_party_flag(self):
-        """Assert that the `update_planned_date` flag on party is respected 
+        """Assert that the `update_planned_date` flag on party is respected
         when the move planned date update is done
         """
         with Transaction().start(DB_NAME, USER, CONTEXT) as transaction:
@@ -166,14 +189,19 @@ class MoveUpdateTestCase(unittest.TestCase):
             self.user.write(cron_user, {
                 'main_company': company_id,
                 'company': company_id,
-                })
-
+            })
             # Setup the chart of accounts which will setup useful accounts
             # required to create party and purchase
             self.setup_chart_of_accounts(company_id)
-            payable_id, = self.account.search([('kind', '=', 'payable')])
-            receivable_id, = self.account.search([('kind', '=', 'receivable')])
-            account_expense, = self.account.search([('kind', '=', 'expense')])
+            payable_id = self.account.search([
+                ('kind', '=', 'payable'),
+            ], limit=1)
+            receivable_id = self.account.search([
+                ('kind', '=', 'receivable'),
+            ], limit=1)
+            account_expense = self.account.search([
+                ('kind', '=', 'expense'),
+            ], limit=1)
 
             currency_id = self.company.read(company_id,
                     ['currency'])['currency']
@@ -187,13 +215,15 @@ class MoveUpdateTestCase(unittest.TestCase):
             # Create a product to test
             product_id = self.product.create({
                 'name': 'Test Move.update_planned_dates',
-                'type': 'stockable',
+                'type': 'goods',
                 'category': category_id,
                 'cost_price_method': 'fixed',
                 'default_uom': unit_id,
                 'purchase_uom': unit_id,
                 'purchasable': True,
-                'account_expense': account_expense,
+                'list_price': '69',
+                'cost_price': '78',
+                'account_expense': account_expense[0],
                 })
 
             # Create two parties one with the update flag and other without it
@@ -201,13 +231,13 @@ class MoveUpdateTestCase(unittest.TestCase):
                 'name': 'Test Party w/o update flag',
                 'update_planned_date': False,
                 'account_receivable': receivable_id,
-                'account_payable': payable_id,
+                'account_payable': payable_id[0],
                 })
             party_wo_update = self.party.browse(party_wo_update_id)
             party_with_update_id = self.party.create({
                 'name': 'Test Party with update flag',
                 'account_receivable': receivable_id,
-                'account_payable': payable_id,
+                'account_payable': payable_id[0],
                 })
             party_with_update = self.party.browse(party_with_update_id)
 
@@ -243,8 +273,8 @@ class MoveUpdateTestCase(unittest.TestCase):
             ids.append(self.purchase.create(values))
             # Confirm both orders
             with Transaction().set_context(company=company_id):
-                self.purchase.workflow_trigger_validate(ids, 'quotation')
-                self.purchase.workflow_trigger_validate(ids, 'confirm')
+                self.purchase.quote(ids)
+                self.purchase.confirm(ids)
 
             orders = self.purchase.browse(ids)
             move_ids = self.move.search([])

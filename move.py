@@ -1,6 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 from trytond.model import ModelSQL, ModelView
+from trytond.pool import Pool
 
 
 class Move(ModelSQL, ModelView):
@@ -10,7 +11,7 @@ class Move(ModelSQL, ModelView):
         """Return the domain expression for selection of moves to update
         planned date.
         """
-        ir_date_obj = self.pool.get('ir.date')
+        ir_date_obj = Pool().get('ir.date')
 
         today = ir_date_obj.today()
         return [
@@ -33,7 +34,7 @@ class Move(ModelSQL, ModelView):
         Update the `planned_date` of all moves from a supplier location
         which have a `planned_date` before today to the current date.
         """
-        ir_date_obj = self.pool.get('ir.date')
+        ir_date_obj = Pool().get('ir.date')
 
         today = ir_date_obj.today()
         domain = self._get_update_planned_date_domain()
